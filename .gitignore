@@ -1,6 +1,7 @@
 *.csv
-
 *.fa
 *.gz
 *.pdf
 *.tab
+
+data/

@@ -6,11 +6,14 @@ a CNN deep learning model for protein function prediction
 
 Go to https://ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/
 
-Download the following files:
-
+Download all the files at the link to the data/ directory:
+- cog-20.cog.csv
 - cog-20.def.tab
 - cog-20.fa.gz
+- cog-20.org.csv
+- cog-20.patt.txt
+- cog-20.tax.csv
+- fun-20.tab.txt
 
-Keep these files in the same directory as this README
+Make sure to expand the cog-20.fa.gz file. 
 
-Make sure to expand the cog-20.fa.gz file. Keep this file in the same directory as this README too.
