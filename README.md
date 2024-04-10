@@ -17,3 +17,35 @@ Download all the files at the link to the data/ directory:
 
 Make sure to expand the cog-20.fa.gz file. 
 
+## Todo
+
+1. Format the data into valid input for CNN model
+    - one-hot encoding
+    - padding so equal lengths
+    - check to see whether 3'-5' order
+
+2. Create model architecture
+    - adapt from Splam model
+
+3. Train on sample data until overfit
+    - show that the pattern can be learned on small datasets
+
+4. Data pre-processing pipeline
+    - create train, test, val splits
+    - for each get the sequence and label 
+    - create pipeline for compiling datasets (maybe put into DataLoader)
+
+5. Training pipeline
+    - train the model on the input data with labels 
+
+6. Validation pipeline
+    - test model on validation sets
+    - develop pipeline to calculate confusion matrix, PR, ROC statistics of classification
+    - show k-fold validation statistics
+
+7. Fine-tune hyperparameter space of model
+    - tune the hyperparameters of model until achieving high validation accuracy
+    - play around with loss function, optimizer, and gradient descent method
+
+8. Test pipeline
+    - test the model on final dataset to evaluate performance

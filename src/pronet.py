@@ -2,6 +2,7 @@ from torch.nn import Module, BatchNorm1d, LazyBatchNorm1d, ReLU, LeakyReLU, Conv
 import numpy as np
 
 CARDINALITY_ITEM = 16
+NUM_CLASSES = 27
 
 class ResidualUnit(Module):
     def __init__(self, l, w, ar, bot_mul=1):
@@ -43,8 +44,7 @@ class ProNet(Module):
         if (len(W)+1) % 4 != 0:
             self.residual_blocks.append(Skip(L))
         self.last_cov = Conv1d(L, 3, 1)
-        self.softmax = Softmax(dim=1)
-
+        self.softmax = Softmax(dim=NUM_CLASSES)
 
     def forward(self, x):
         x, skip = self.skip1(self.conv1(x), 0)
@@ -54,9 +54,3 @@ class ProNet(Module):
         # predicting pb for every bp
         #######################################
         return self.softmax(self.last_cov(skip))
-
-        # #######################################
-        # # predicting splice / non-splice
-        # #######################################
-        # output = self.sigmoid(self.fc(self.flatten(self.last_cov(skip))))
-        # return output
