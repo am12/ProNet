@@ -1,7 +1,7 @@
+data/
+
 *.csv
 *.fa
 *.gz
 *.pdf
-*.tab
-
-data/
+*.ta
