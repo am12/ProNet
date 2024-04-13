@@ -1,136 +1,105 @@
-
-
-
-
+import numpy as np
+from pyfaidx import Fasta
+import os
+import csv
+from progress.bar import Bar
 
 protein_dict = {}
+data_dir = '../data/'
+out_dir = '../results/'
 
-class myDataset(Dataset):
-    def __init__(self, type, of, shuffle, segment_len=800):
-        self.segment_len = segment_len
-        self.data = []
-        self.indices = []
-        pidx = 0
-        with open(of, 'r') as f:
-            lines = f.read().splitlines()
-            seq_name = ''
-            seq = ''
-            for line in lines:
-                if pidx % 2 == 0:
-                    seq_name = split_seq_name(line)
-                elif pidx % 2 == 1:
-                    seq = line
-                    if seq[0] == '>':
-                        seq_name = line
-                        continue
-                    X, Y = create_datapoints(seq, '+')
-                    X = torch.Tensor(np.array(X))
-                    Y = torch.Tensor(np.array(Y)[0])
-                    if X.size()[0] != 800:
-                        print('seq_name: ', seq_name)
-                        print(X.size())
-                        print(Y.size())
-                    self.data.append([X, Y, seq_name])
-                pidx += 1
-                if pidx %100000 == 0:
-                    print('\t', pidx//2, ' junctions loaded.')
+# extract sequence name, sequence, and label for every sequence
 
-        index_shuf = list(range(len(self.data)))
-        if shuffle:
-            random.shuffle(index_shuf)
-        list_shuf = [self.data[i] for i in index_shuf]
-        self.data = list_shuf
-        self.indices = index_shuf
-        print('\t', pidx//2, ' junctions loaded.')
+def get_labels():
+    # COG ID to label
+    print('Retrieving COG IDs...')
+    with open(f"{data_dir}cog-20.def.tab", "r") as f:
+        reader = csv.reader(f, delimiter='\t')
+        cog_to_label = {row[0]: row[1][0] for row in reader} # only gets the primary label
 
-    def __len__(self):
-        return len(self.data)
+    # GenBank protein ID to COG ID
+    print('Retrieving Protein IDs...')
+    with open(f'{data_dir}cog-20.cog.csv', 'r') as f:
+        reader = csv.reader(f, delimiter=',')
+        prot_to_cog = {row[2]: row[6] for row in reader}
 
-    def __getitem__(self, index):
-        feature = self.data[index][0]
-        label = self.data[index][1]
-        seq_name = self.data[index][2]
-        feature = torch.flatten(feature, start_dim=1)
-        return feature, label, seq_name
+    # load fasta file into pyfaidx Fasta object
+    print('Loading protein sequences...')
+    proteins = Fasta(f'{data_dir}cog-20.fa', sequence_always_upper=True, key_function=lambda x: x.replace('_', '.'))
 
-def get_dataloader(batch_size, n_workers, output_file, shuffle, repeat_idx):
-    testset = myDataset('test', output_file, shuffle, SEQ_LEN)
-    test_loader = DataLoader(
-        testset,
-        batch_size = batch_size,
-        drop_last = False,
-        pin_memory = True,
-    )
-    return test_loader
-
-def splam_prediction(junction_fasta, out_score_f, model_path, batch_size, device_str):
-    BATCH_SIZE = int(batch_size)
-    N_WORKERS = None
-    if device_str == "NONE":
-        device_str = 'cpu'
-        if torch.cuda.is_available(): 
-            device_str = 'cuda'
-        elif torch.backends.mps.is_available():
-            device_str = 'mps'
-    device = torch.device(device_str)
-
-    print(f'[Info] Running model in "'+ device_str+'" mode')
-    print(f'[Info] Loading model ... (' + model_path + ')', flush = True)
-    # model = torch.jit.load(model_path)
-    print("model = torch.load(model_path)!!")
-    model = torch.load(model_path)
-    model = model.to(device)
-
-    print(f'[Info] Done loading model', flush = True)
-    print(f'[Info] Loading data ...', flush = True)
-    test_loader = get_dataloader(BATCH_SIZE, N_WORKERS, junction_fasta, False, str(0))
-    print(f'[Info] Done loading data', flush = True)
+    print(proteins.keys())
     
-    criterion = torch.nn.BCELoss()
-    fw_junc_scores = open(out_score_f, 'w')
+    # pbar = Bar('Writing')
+    # with open
 
-    model.eval()
-    junc_counter = 0
-    pbar = Bar('[Info] SPLAM! ', max=len(test_loader))
-    with torch.no_grad():
-        for batch_idx, data in enumerate(test_loader):
-            # DNAs:  torch.Size([40, 800, 4])
-            # labels:  torch.Size([40, 1, 800, 3])
-            DNAs, labels, seqname = data
-            DNAs = DNAs.to(torch.float32).to(device)
-            labels = labels.to(torch.float32).to(device)
+get_labels()
+    
+    
+    
+    
 
-            DNAs = torch.permute(DNAs, (0, 2, 1))
-            labels = torch.permute(labels, (0, 2, 1))
-            loss, yp = model_fn(DNAs, labels, model, criterion)
-            is_expr = (labels.sum(axis=(1,2)) >= 1)
-            A_YL = labels[is_expr, 1, :].to('cpu').detach().numpy()
-            A_YP = yp[is_expr, 1, :].to('cpu').detach().numpy()
-            D_YL = labels[is_expr, 2, :].to('cpu').detach().numpy()
-            D_YP = yp[is_expr, 2, :].to('cpu').detach().numpy()
+def prot_id_to_label():
+    id_to_label = {}
+    
+    with open("cog_to_label.json", "r") as f:
+        cog_to_label = json.load(f)
+    
+    for i in range(1, 5951):
+        num = str(i).zfill(4)
+        filename = "fasta/COG" + num + ".tsv.gz"
+        if os.path.exists(filename):
+            with gzip.open(filename, "rt") as f:
+                reader = csv.reader(f, delimiter='\t')
+                for row in reader:
+                    id = row[0]
+                    label = cog_to_label.get("COG" + num)
+                    if label is not None:
+                        print("COG" + num + ": ", id, label)
+                        id_to_label[id] = label
+                    else:
+                        print("Label not found.")
+        else:
+            print("File does not exist.")
+            
+    with open("protein_id_to_label.json", "w") as f:
+        json.dump(id_to_label, f)
+        print("ID TO LABEL TEST")
+        print(id_to_label["ABX12048.1"])
 
-            donor_labels, donor_scores, acceptor_labels, acceptor_scores = get_donor_acceptor_scores(D_YL, A_YL, D_YP, A_YP)
-            for idx in range(len(yp)):
-
-                eles = seqname[idx].split(';')
-                if len(eles) == 7:
-                    chr, start, end, strand, name, aln_num, trans = eles
-                    if strand == '+':
-                        fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
-                    elif strand == '-':
-                        fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
-
+def seq_to_label():
+    with open("protein_id_to_label.json", "r") as f:
+        protein_id_to_label = json.load(f)
+    
+    sequence_to_label = {}
+    
+    # parse the cog-20.fa file 2 lines at a time
+    
+    with open("cog-20.fa", "r") as f:
+        for line in f:
+            if line.startswith(">"):
+                protein_id = ((line[1:].strip()).split())[0]
+                # replace the second to last character with a period
+                protein_id = protein_id[:-2] + "." + protein_id[-1]
+                print(protein_id)
+                label = protein_id_to_label.get(protein_id)
+                if label is not None:
+                    sequence = next(f).strip()
+                    # print(sequence, label)
+                    sequence_to_label[sequence] = label
                 else:
-                    chr, start, end, strand, name, aln_num = eles
-                    if strand == '+':
-                        fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
-                    elif strand == '-':
-                        fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
-                
-                junc_counter += 1            
-            # increment the progress bar
-            pbar.next()
+                    print("Label not found")
+                    
+    with open("sequence_to_label.json", "w") as f:
+        json.dump(sequence_to_label, f)
 
-    pbar.finish()
-    fw_junc_scores.close()
-    return out_score_f
+
+def create_data():
+
+    os.chdir(input_dir)
+    
+
+    pass
+
+
+if __name__ == '__main__':
+    create_data()
