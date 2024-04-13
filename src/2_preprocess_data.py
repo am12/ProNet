@@ -20,8 +20,6 @@ class ProData(Dataset):
         self.segment_len = segment_len # will truncate to this length 
         self.data = []
         self.indices = [] # shuffle indices
-        self.mode = mode
-        self.shuffle = shuffle
         
         # set the random state
         if seed:
@@ -52,7 +50,12 @@ class ProData(Dataset):
                 prot_id, cog_id = row[0], row[1]
                 
                 # one-hot encoding and padding
-                X, Y = create_datapoints(seq, max_len)
+                if mode == 'train': 
+                    X, Y = create_datapoints(seq, max_len, labels)
+                elif mode == 'test':
+                    X, Y = create_datapoints(seq, max_len)
+                else: 
+                    raise ValueError('mode must be either "train" or "test".')
                 X = torch.Tensor(np.array(X))
                 Y = torch.Tensor(np.array(Y)[0])
 
@@ -87,7 +90,8 @@ class ProData(Dataset):
         sequence = torch.flatten(sequence, start_dim=1)
         return sequence, label, prot_id, cog_id
 
-def create_datapoints(seq, strand):
+def create_datapoints(seq, max_len, labels=None):
+    '''Performs a standard one-hot encoding of the protein sequence and labels'''
     seq = seq.upper().replace('A', '1').replace('C', '2').replace('G', '3').replace('T', '4')
     pattern = r'[^1234]'
     # Replace non-ACGT characters with 0
