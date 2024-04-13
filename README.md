@@ -17,6 +17,13 @@ Download all the files at the link to the data/ directory:
 
 Make sure to expand the cog-20.fa.gz file. 
 
+## Nice to Have
+
+1. Experiment with different embedding/representations of data
+https://pubmed.ncbi.nlm.nih.gov/33143605/ -> variable length n-gram embedding
+https://academic.oup.com/bioinformatics/article/34/15/2642/4951834 -> learned embeddings
+https://academic.oup.com/bioinformatics/article/40/1/btad786/7510842 -> embedding-based alignment
+
 ## Todo
 
 1. Format the data into valid input for CNN model

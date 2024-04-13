@@ -5,9 +5,6 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.optim import Optimizer
 from torch.utils.data import Dataset, DataLoader
 
-
-
-
 def splam_prediction(junction_fasta, out_score_f, model_path, batch_size, device_str):
     BATCH_SIZE = int(batch_size)
     N_WORKERS = None
