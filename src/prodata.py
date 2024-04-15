@@ -6,17 +6,55 @@ from torch.utils.data import Dataset, DataLoader
 # pad with X and one-hot encode 
 # later will try to experiment with other kinds of embeddings 
 
+def create_datapoints(seq, max_len, labels):
+    '''Truncates, pads, and performs one-hot encoding of the protein sequence and labels'''
+    num_class_labels = 25 # 25 classes of protein functions
+
+    # uppercase and truncate or pad with 'X' so all are equal length 
+    seq = seq.upper()[:max_len] + 'X' * (max_len - len(seq))
+    
+    # mapping from amino acids to indices
+    aa_to_index = {
+        'A': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8,
+        'K': 9, 'L': 10, 'M': 11, 'N': 12, 'P': 13, 'Q': 14, 'R': 15,
+        'S': 16, 'T': 17, 'V': 18, 'W': 19, 'Y': 20
+    }
+
+    # convert sequence to indices, setting X to 0
+    indexed_seq = [aa_to_index.get(aa, 0) for aa in seq]
+
+    # convert sequence and labels into numpy arrays
+    X0 = np.array(indexed_seq, dtype=np.int32)
+
+    # one-hot encode the input sequence
+    X = np.zeros((len(X0), 20))  # create an array of zeros for 20 amino acids
+    for i, index in enumerate(X0):
+        if index > 0:
+            X[i, index-1] = 1  # set the appropriate index to 1, shifting by 1 because index 0 is for 'X' as all zeros
+
+    # label mapping from letter to index
+    label_to_index = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8, 'J': 9, 'K': 10, 'L': 11, 'M': 12,
+                        'N': 13, 'O': 14, 'P': 15, 'Q': 16, 'R': 17, 'S': 18, 'T': 19, 'U': 20, 'V': 21, 'W': 22, 'X': 23, 'Z': 24}
+
+    # one-hot encode the single letter label
+    Y = np.zeros((25,))  # create a zero vector of length 25
+    Y[label_to_index[label.upper()]] = 1  # set the index corresponding to the label
+
+    return X, Y
+
+
 class ProData(Dataset):
     def __init__(self, mode, dataset_file, shuffle, seed=None, segment_len=None, verbose=True):
         '''
         Parameters: 
-            - mode (str) -> 'train' or 'test'
+            - mode (str) -> 'train' or 'test', just a label no function
             - dataset_file (str) -> path to the created dataset 
             - shuffle (bool) -> whether to shuffle the data (generally yes for train, no for test)
             - seed (int) -> random seed to use if given (default: None)
             - segment_len (int) -> length to truncate protein sequence to (default: None -> will not truncate)
             - verbose (bool) -> whether to print out status (default: True)
         '''
+        self.mode = mode
         self.segment_len = segment_len # will truncate to this length 
         self.data = []
         self.indices = [] # shuffle indices
@@ -79,6 +117,9 @@ class ProData(Dataset):
         if verbose: 
             print(f'\t[INFO] {pidx} junctions loaded.')
 
+    def get_mode(self):
+        return self.mode
+
     def __len__(self):
         return len(self.data)
 
@@ -89,35 +130,3 @@ class ProData(Dataset):
         cog_id = self.data[index][3]
         sequence = torch.flatten(sequence, start_dim=1)
         return sequence, label, prot_id, cog_id
-
-def create_datapoints(seq, max_len, labels=None):
-    '''Performs a standard one-hot encoding of the protein sequence and labels'''
-    seq = seq.upper().replace('A', '1').replace('C', '2').replace('G', '3').replace('T', '4')
-    pattern = r'[^1234]'
-    # Replace non-ACGT characters with 0
-    seq = re.sub(pattern, '0', seq)
-    jn_start = JUNC_START
-    jn_end = JUNC_END
-
-    #######################################
-    # predicting pb for every bp
-    #######################################
-    X0 = np.asarray(list(map(int, list(seq))))
-    Y0 = [np.zeros(SEQ_LEN) for t in range(1)]
-    if strand == '+':
-        for t in range(1):
-            Y0[t][jn_start] = 2
-            Y0[t][jn_end] = 1
-    X, Y = one_hot_encode(X0, Y0)
-    return X, Y
-
-
-def get_dataloader(batch_size, n_workers, output_file, shuffle, repeat_idx):
-    testset = myDataset('test', output_file, shuffle, SEQ_LEN)
-    test_loader = DataLoader(
-        testset,
-        batch_size = batch_size,
-        drop_last = False,
-        pin_memory = True,
-    )
-    return test_loader

@@ -4,6 +4,20 @@ from torch.nn import Module, BatchNorm1d, LeakyReLU, Conv1d, ModuleList, Softmax
 from torch.optim.lr_scheduler import LambdaLR
 from torch.optim import Optimizer
 from torch.utils.data import Dataset, DataLoader
+from pronet import ProNet
+from prodata import ProData
+from preprocess_data import ProData
+
+def get_dataloader(batch_size, n_workers, output_file, shuffle, repeat_idx):
+    testset = myDataset('test', output_file, shuffle, SEQ_LEN)
+    test_loader = DataLoader(
+        testset,
+        batch_size = batch_size,
+        shuffle = False,
+        drop_last = False,
+        pin_memory = True,
+    )
+    return test_loader
 
 def get_donor_acceptor_scores(D_YL, A_YL, D_YP, A_YP):
     return D_YL[:, 200], D_YP[:, 200], A_YL[:, 600], A_YP[:, 600]
@@ -15,6 +29,7 @@ def get_cosine_schedule_with_warmup(
       num_cycles: float = 0.5,
       last_epoch: int = -1,
     ):
+
     def lr_lambda(current_step):
         # warmup
         if current_step < num_warmup_steps:
@@ -46,7 +61,7 @@ def categorical_crossentropy_2d(y_true, y_pred, criterion):
                         + SEQ_WEIGHT * y_true[:, 1, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 1, :]), gamma ), torch.log(y_pred[:, 1, :]+1e-10) )
                         + SEQ_WEIGHT * y_true[:, 2, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 2, :]), gamma ), torch.log(y_pred[:, 2, :]+1e-10) ))
 
-def splam_prediction(junction_fasta, out_score_f, model_path, batch_size, device_str):
+def pronet_prediction(junction_fasta, out_score_f, model_path, batch_size, device_str):
     BATCH_SIZE = int(batch_size)
     N_WORKERS = None
     if device_str == "NONE":
@@ -74,7 +89,7 @@ def splam_prediction(junction_fasta, out_score_f, model_path, batch_size, device
 
     model.eval()
     junc_counter = 0
-    pbar = Bar('[Info] SPLAM! ', max=len(test_loader))
+    pbar = Bar('[Info] Running ProNet... ', max=len(test_loader))
     with torch.no_grad():
         for batch_idx, data in enumerate(test_loader):
             # DNAs:  torch.Size([40, 800, 4])
@@ -117,3 +132,45 @@ def splam_prediction(junction_fasta, out_score_f, model_path, batch_size, device
     pbar.finish()
     fw_junc_scores.close()
     return out_score_f
+
+
+def train(model, train_loader, criterion, optimizer, num_epochs=10):
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
+        for i, (inputs, labels) in enumerate(train_loader):
+            inputs, labels = inputs.to(device), labels.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            running_loss += loss.item()
+            if i % 10 == 9:
+                print(f'Epoch {epoch + 1}, Batch {i + 1}, Loss: {running_loss / 10:.4f}')
+                running_loss = 0.0
+
+def evaluate(model, test_loader):
+    model.eval()
+    total = 0
+    correct = 0
+    with torch.no_grad():
+        for data in test_loader:
+            images, labels = data
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    print(f'Accuracy of the model on the test images: {100 * correct / total}%')
+
+
+if __name__ == '__main__':
+
+    train_dataset = HandsDataset("train.csv", None, CUDA)  # Adjust path and normalization as necessary
+    train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+
+    test_dataset = HandsDataset("test.csv", None, CUDA)
+    test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False)

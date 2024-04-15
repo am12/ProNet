@@ -2,6 +2,7 @@ import numpy as np
 from pyfaidx import Fasta
 import os
 import csv
+import pandas as pd
 from progress.bar import Bar
 
 protein_dict = {}
@@ -35,7 +36,19 @@ def get_labels():
     for protein in proteins:
         print(protein.name)
         print(protein)
-    # pbar = Bar('Writing')
-    # with open
 
-get_labels()
+
+def find_labels(): 
+    data = pd.read_csv('../results/1/dataset.csv')
+
+    # Create DataFrame
+    df = pd.DataFrame(data)
+
+    # Get unique items from the second column
+    unique_items = df.iloc[:, 2].unique()  # using .iloc[:, 1] to select the second column
+    print(len(unique_items))
+    print("Unique items in the second column:", sorted(unique_items))
+
+    
+find_labels()
+# get_labels()
