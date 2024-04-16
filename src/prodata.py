@@ -6,6 +6,17 @@ from torch.utils.data import Dataset, DataLoader
 # pad with X and one-hot encode 
 # later will try to experiment with other kinds of embeddings 
 
+def get_dataloader(batch_size, mode, dataset_file, shuffle, seed=None, segment_len=None, verbose=True):
+    dataset = ProData(mode, dataset_file, shuffle, seed, segment_len, verbose)
+    loader = DataLoader(
+        dataset,
+        batch_size = batch_size,
+        shuffle = False,
+        drop_last = False,
+        pin_memory = True,
+    )
+    return loader
+
 def create_datapoints(seq, max_len, labels):
     '''Truncates, pads, and performs one-hot encoding of the protein sequence and labels'''
     num_class_labels = 25 # 25 classes of protein functions
@@ -33,8 +44,11 @@ def create_datapoints(seq, max_len, labels):
             X[i, index-1] = 1  # set the appropriate index to 1, shifting by 1 because index 0 is for 'X' as all zeros
 
     # label mapping from letter to index
-    label_to_index = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8, 'J': 9, 'K': 10, 'L': 11, 'M': 12,
-                        'N': 13, 'O': 14, 'P': 15, 'Q': 16, 'R': 17, 'S': 18, 'T': 19, 'U': 20, 'V': 21, 'W': 22, 'X': 23, 'Z': 24}
+    label_to_index = {
+        'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8,
+        'J': 9, 'K': 10, 'L': 11, 'M': 12, 'N': 13, 'O': 14, 'P': 15, 'Q': 16,
+        'R': 17, 'S': 18, 'T': 19, 'U': 20, 'V': 21, 'W': 22, 'X': 23, 'Z': 24
+    }
 
     # one-hot encode the single letter label
     Y = np.zeros((25,))  # create a zero vector of length 25
