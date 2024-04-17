@@ -19,8 +19,7 @@ def get_dataloader(batch_size, mode, dataset_file, shuffle, seed=None, segment_l
 
 def create_datapoints(seq, max_len, labels):
     '''Truncates, pads, and performs one-hot encoding of the protein sequence and labels'''
-    num_class_labels = 25 # 25 classes of protein functions
-
+    
     # uppercase and truncate or pad with 'X' so all are equal length 
     seq = seq.upper()[:max_len] + 'X' * (max_len - len(seq))
     
