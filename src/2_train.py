@@ -1,21 +1,44 @@
 # run training loop
+import os
 import torch 
 from torch.nn import Module, BatchNorm1d, LeakyReLU, Conv1d, ModuleList, Softmax, Sigmoid, Flatten, Dropout2d, Linear
 from torch.optim.lr_scheduler import LambdaLR
 from torch.optim import Optimizer
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from pronet import ProNet
-from prodata import ProData
-from preprocess_data import ProData, get_dataloader
+from prodata import ProData, get_dataloader
 import time
+import random
 
-BATCH_SIZE = 16
-RANDOM_SEED = 42
+### GLOBAL VARIABLES ### 
+NUM_EPOCHS = 10
+BATCH_SIZE = 100
+RANDOM_SEED = 42 # this seed is for shuffling data
 experiment_number = 1
+input_dir = '../results/1/'
 out_dir = '../results/2/'
 os.makedirs(os.path.dirname(out_dir), exist_ok=True)
 
-def split_data(datafile, test_ratio=0.2, indices=None, seed=None):
+
+def same_seeds(seed):
+    '''Fix random seeds for PyTorch'''
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+same_seeds(0) # this seed is for torch 
+
+def categorical_crossentropy_2d(y_pred, y_true, seq_weight=5, gamma=2):
+    '''Computes weighted categorical CE loss for 2D tensor, appling focal loss modification for hard examples.'''
+    return - torch.mean(y_true[:, 0, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 0, :]), gamma ), torch.log(y_pred[:, 0, :]+1e-10) )
+                        + seq_weight * y_true[:, 1, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 1, :]), gamma ), torch.log(y_pred[:, 1, :]+1e-10) )
+                        + seq_weight * y_true[:, 2, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 2, :]), gamma ), torch.log(y_pred[:, 2, :]+1e-10) ))
+
+def split_data(datafile, test_ratio=0.15, indices=None, seed=None):
     '''Create a training and testing split of the datafiles'''
 
     # read all lines from the input file
@@ -40,7 +63,7 @@ def split_data(datafile, test_ratio=0.2, indices=None, seed=None):
     print(f'\t[INFO] Split data. Training size: {len(train_lines)} | Testing size: {len(test_lines)}')
     
     # write data to respective files
-    base_dir = os.path.dirname(datafile)
+    base_dir = os.path.dirname(datafile) + '/'
     train_file_path = f'{base_dir}train_data.csv'
     test_file_path = f'{base_dir}test_data.csv'
     with open(train_file_path, 'w') as file:
@@ -51,48 +74,125 @@ def split_data(datafile, test_ratio=0.2, indices=None, seed=None):
 
     return train_file_path, test_file_path
 
+def train_single_epoch(epoch_num, model, train_loader, logger, optimizer, criterion=None):
+    
+    model.train()
+    print(f'\t[INFO] Model in train mode.')
 
-def train(model, train_loader, criterion, optimizer, num_epochs=10):
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-        for i, (inputs, labels) in enumerate(train_loader):
-            inputs, labels = inputs.to(device), labels.to(device)
+    running_loss = 0.0
+    pbar = tqdm(total=len(train_loader), ncols=0, desc="Train", unit=" step")
+    for batch_idx, data in enumerate(train_loader): 
             
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            
-            running_loss += loss.item()
-            if i % 10 == 9:
-                print(f'Epoch {epoch + 1}, Batch {i + 1}, Loss: {running_loss / 10:.4f}')
-                running_loss = 0.0
+        ### PREDICTION ###
+        seqs, labels, prot_id, cog_id = data
+        seqs = seqs.to(torch.float32).to(device)
+        labels = labels.to(torch.float32).to(device)
+        seqs = torch.permute(seqs, (0, 2, 1))
+        labels = torch.permute(labels, (0, 2, 1))
+        
+        # forward pass
+        pred = model(seqs)
+        if criterion:
+            loss = criterion(pred, labels)
+        else:
+            loss = categorical_crossentropy_2d(pred, labels)
 
+        # backward and optimize
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        ### LOGGING ###
+        iter_num = epoch_num * len(train_loader) + batch_idx
+        logger.add_scalar('Loss/train', loss.item(), iter_num)
 
-def evaluate(model, test_loader):
+        running_loss += loss.item()
+        if (batch_idx + 1) % 10 == 0:
+            print(f'\t[INFO] Epoch {epoch_num + 1}, Batch {batch_idx + 1}, Loss: {running_loss / 10:.6f}')     
+            running_loss = 0.0
+        
+            # add histograms of model parameters to inspect their distributions
+            for name, weight in model.named_parameters():
+                logger.add_histogram(name, weight, iter_num)
+                logger.add_histogram(f'{name}.grad', weight.grad, iter_num)
+        
+        pbar.update(1)
+        pbar.set_postfix(
+            batch_id=batch_idx,
+            # idx_train=len(train_loader)*BATCH_SIZE,
+            # loss=f"{batch_loss:.6f}",
+            # A_auprc = f"{A_auprc:.6f}",
+            # D_auprc = f"{D_auprc:.6f}",
+            # A_Precision=f"{A_TP/(A_TP+A_FP+1e-6):.6f}",
+            # A_Recall=f"{A_TP/(A_TP+A_FN+1e-6):.6f}",
+            # D_Precision=f"{D_TP/(D_TP+D_FP+1e-6):.6f}",
+            # D_Recall=f"{D_TP/(D_TP+D_FN+1e-6):.6f}",
+            # J_Precision=f"{J_TP/(J_TP+J_FP+1e-6):.6f}",
+            # J_Recall=f"{J_TP/(J_TP+J_FN+1e-6):.6f}"
+        )  
+
+    pbar.close()
+
+    # print(f'Accuracy of the model on the train dataset: {100 * correct / total}%', file=stats_file)
+    # print(f'Epoch {epoch_idx+0:03}: | Loss: {epoch_loss/len(train_loader):.5f} | Donor top-k Acc: {epoch_donor_acc/len(train_loader):.3f} | Acceptor top-k Acc: {epoch_acceptor_acc/len(train_loader):.3f}')
+    # print(f'Junction Precision: {J_G_TP/(J_G_TP+J_G_FP):.5f} | Junction Recall: {J_G_TP/(J_G_TP+J_G_FN):.5f} | TP: {J_G_TP} | FN: {J_G_FN} | FP: {J_G_FP} | TN: {J_G_TN}')
+    # print(f'Donor Precision   : {D_G_TP/(D_G_TP+D_G_FP):.5f} | Donor Recall   : {D_G_TP/(D_G_TP+D_G_FN):.5f} | TP: {D_G_TP} | FN: {D_G_FN} | FP: {D_G_FP} | TN: {D_G_TN}')
+    # print(f'Acceptor Precision: {A_G_TP/(A_G_TP+A_G_FP):.5f} | Acceptor Recall: {A_G_TP/(A_G_TP+A_G_FN):.5f} | TP: {A_G_TP} | FN: {A_G_FN} | FP: {A_G_FP} | TN: {A_G_TN}')
+    # print ("Learning rate: %.5f" % (get_lr(optimizer)))
+    # print("\n\n")
+
+def evaluate_single_epoch(epoch_num, model, test_loader, stats_file, criterion=None):
+    
     model.eval()
+    print(f'\t[INFO] Model in evaluation mode.')
+
     total = 0
     correct = 0
     with torch.no_grad():
-        for data in test_loader:
-            images, labels = data
-            images, labels = images.to(device), labels.to(device)
-            outputs = model(images)
-            _, predicted = torch.max(outputs.data, 1)
+        pbar = tqdm(total=len(test_loader), ncols=0, desc="Test", unit=" step")
+        for batch_idx, data in enumerate(test_loader):
+            seqs, labels, prot_id, cog_id = data
+            seqs = seqs.to(torch.float32).to(device)
+            labels = labels.to(torch.float32).to(device)
+            seqs = torch.permute(seqs, (0, 2, 1))
+            labels = torch.permute(labels, (0, 2, 1))
+            
+            pred = model(seqs)
+            if criterion:
+                loss = criterion(pred, labels)
+            else:
+                loss = categorical_crossentropy_2d(pred, labels)
+
+            _, predicted = torch.max(pred.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-    print(f'Accuracy of the model on the test dataset: {100 * correct / total}%')
+            
+            pbar.update(1)
+            pbar.set_postfix(
+                batch_id=batch_idx,
+                # idx_test=len(test_loader)*BATCH_SIZE,
+                # loss=f"{batch_loss:.6f}",
+                # A_auprc = f"{A_auprc:.6f}",
+                # D_auprc = f"{D_auprc:.6f}",
+                # A_Precision=f"{A_TP/(A_TP+A_FP+1e-6):.6f}",
+                # A_Recall=f"{A_TP/(A_TP+A_FN+1e-6):.6f}",
+                # D_Precision=f"{D_TP/(D_TP+D_FP+1e-6):.6f}",
+                # D_Recall=f"{D_TP/(D_TP+D_FN+1e-6):.6f}",
+                # J_Precision=f"{J_TP/(J_TP+J_FP+1e-6):.6f}",
+                # J_Recall=f"{J_TP/(J_TP+J_FN+1e-6):.6f}"
+            )
+    
+        pbar.close()
 
+    print(f'Accuracy of the model on the test dataset: {100 * correct / total}%', file=stats_file)
+    # print(f'Epoch {epoch_idx+0:03}: | Loss: {epoch_loss/len(train_loader):.5f} | Donor top-k Acc: {epoch_donor_acc/len(train_loader):.3f} | Acceptor top-k Acc: {epoch_acceptor_acc/len(train_loader):.3f}')
+    # print(f'Junction Precision: {J_G_TP/(J_G_TP+J_G_FP):.5f} | Junction Recall: {J_G_TP/(J_G_TP+J_G_FN):.5f} | TP: {J_G_TP} | FN: {J_G_FN} | FP: {J_G_FP} | TN: {J_G_TN}')
+    # print(f'Donor Precision   : {D_G_TP/(D_G_TP+D_G_FP):.5f} | Donor Recall   : {D_G_TP/(D_G_TP+D_G_FN):.5f} | TP: {D_G_TP} | FN: {D_G_FN} | FP: {D_G_FP} | TN: {D_G_TN}')
+    # print(f'Acceptor Precision: {A_G_TP/(A_G_TP+A_G_FP):.5f} | Acceptor Recall: {A_G_TP/(A_G_TP+A_G_FN):.5f} | TP: {A_G_TP} | FN: {A_G_FN} | FP: {A_G_FP} | TN: {A_G_TN}')
+    # print ("Learning rate: %.5f" % (get_lr(optimizer)))
+    # print("\n\n")
 
-def categorical_crossentropy_2d(y_pred, y_true, seq_weight=5, gamma=2):
-    return - torch.mean(y_true[:, 0, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 0, :]), gamma ), torch.log(y_pred[:, 0, :]+1e-10) )
-                        + seq_weight * y_true[:, 1, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 1, :]), gamma ), torch.log(y_pred[:, 1, :]+1e-10) )
-                        + seq_weight * y_true[:, 2, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 2, :]), gamma ), torch.log(y_pred[:, 2, :]+1e-10) ))
-
-
-def train(train_datafile, test_datafile, train_logfile, batch_size, lr=1e-3, num_epochs=10, device_str=None):
+def train(train_datafile, test_datafile, train_statsfile, batch_size, lr=1e-3, num_epochs=16, device_str=None):
     
     print('Setting up training variables...')
     start_time = time.time()
@@ -116,7 +216,13 @@ def train(train_datafile, test_datafile, train_logfile, batch_size, lr=1e-3, num
 
     # load data to train the model on 
     print(f'\t[Info] Loading data...', flush=True)
-    train_loader = get_dataloader(batch_size, 'train', train_datafile, False, seed=RANDOM_SEED)
+    train_loader = get_dataloader(batch_size, 'train', train_datafile, True, seed=RANDOM_SEED)
+    test_loader = get_dataloader(batch_size, 'test', test_datafile, False, seed=RANDOM_SEED)
+    ### to expedite
+    torch.save(train_loader, '../results/1/train_dataloader.pt')
+    torch.save(test_loader, '../results/1/test_dataloader.pt')
+    # train_loader = torch.load('../results/1/train_dataloader.pt')
+    # test_loader = torch.load('../results/1/test_dataloader.pt')
     print(f'\t[Info] Done loading data.', flush=True)
 
     # time after iteration
@@ -127,94 +233,24 @@ def train(train_datafile, test_datafile, train_logfile, batch_size, lr=1e-3, num
     #####################
 
     # initialize the SummaryWriter
-    writer = SummaryWriter(f'{out_dir}runs/experiment_{experiment_number}')
+    logger = SummaryWriter(f'{out_dir}runs/experiment_{experiment_number}')
 
-    print('Starting training.')
+    print('Starting training...')
     start_time = time.time()
-    log = open(train_logfile, 'w')
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-        for batch_idx, data in enumerate(train_loader): 
-                
-            ### PREDICTION ###
-            seqs, labels, prot_id, cog_id = data
-            seqs = seqs.to(torch.float32).to(device)
-            labels = labels.to(torch.float32).to(device)
-            seqs = torch.permute(seqs, (0, 2, 1))
-            labels = torch.permute(labels, (0, 2, 1))
-            
-            # forward pass
-            outputs = model(seqs)
-            #loss = criterion(outputs, labels)
-            loss = categorical_crossentropy_2d(outputs, labels)
-
-            # backward and optimize
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            ### LOGGING ###
-            writer.add_scalar('Loss/train', loss.item(), epoch * len(train_loader) + batch_idx)
-
-            running_loss += loss.item()
-            if batch_idx % 10 == 9:
-                print(f'\t[INFO] Epoch {epoch + 1}, Batch {i + 1}, Loss: {running_loss / 10:.6f}')     
-                running_loss = 0.0
-            
-            # add histograms of model parameters to inspect their distributions
-            for name, weight in model.named_parameters():
-                writer.add_histogram(name, weight, epoch)
-                writer.add_histogram(f'{name}.grad', weight.grad, epoch)
-            
-            is_expr = (labels.sum(axis=(1,2)) >= 1)
-            A_YL = labels[is_expr, 1, :].to('cpu').detach().numpy()
-            A_YP = yp[is_expr, 1, :].to('cpu').detach().numpy()
-            D_YL = labels[is_expr, 2, :].to('cpu').detach().numpy()
-            D_YP = yp[is_expr, 2, :].to('cpu').detach().numpy()
-
-            donor_labels, donor_scores, acceptor_labels, acceptor_scores = get_donor_acceptor_scores(D_YL, A_YL, D_YP, A_YP)
-            
-            # for idx in range(len(yp)):
-                
-                # eles = seqname[idx].split(';')
-                # if len(eles) == 7:
-                #     chr, start, end, strand, name, aln_num, trans = eles
-                #     if strand == '+':
-                #         fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
-                #     elif strand == '-':
-                #         fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
-
-                # else:
-                #     chr, start, end, strand, name, aln_num = eles
-                #     if strand == '+':
-                #         fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
-                #     elif strand == '-':
-                #         fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
-                
-                # junc_counter += 1 
-
+    with open(train_statsfile, 'w') as stats_file:
+        for epoch_num in range(num_epochs):
+            print(f'Epoch {epoch_num}/{num_epochs}:')
+            train_single_epoch(epoch_num, model, train_loader, logger, optimizer)
+            evaluate_single_epoch(epoch_num, model, test_loader, stats_file)
+            torch.save(model, f'{out_dir}runs/experiment_{experiment_number}/models/pronet_epoch-{epoch_num}.pt')
         
-     
+    print("--- %s minutes ---" % ((time.time() - start_time)/60.0))
 
-    print("--- %s seconds ---" % (time.time() - start_time))
-
-
-    log.close()
-
-    return out_score_f
 
 if __name__ == '__main__':
-
-    train_dataloader = get_dataloader(BATCH_SIZE, 'train', )
-    train_dataset = HandsDataset("train.csv", None, CUDA)  # Adjust path and normalization as necessary
-    train_dataloader = DataLoader(train_dataset, batch_size=4, shuffle=True)
-
-    test_dataset = HandsDataset("test.csv", None, CUDA)
-    test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False)
-    
-
-    # training 
-    train_datafile, test_datafile = split_data()
-    train_logfile = '../results/2/train.log'
-    train(train_datafile, test_datafile, train_logfile, BATCH_SIZE)
+   
+    # train_datafile, test_datafile = split_data(f'{input_dir}dataset.csv')
+    train_datafile = '../results/1/train_data.csv'
+    test_datafile = '../results/1/test_data.csv'
+    train_statsfile = f'{out_dir}train_statistics.txt'
+    train(train_datafile, test_datafile, train_statsfile, BATCH_SIZE)

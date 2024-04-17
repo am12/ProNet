@@ -1,6 +1,7 @@
 # load data into a dataloader
 import random
 import numpy as np
+import torch
 from torch.utils.data import Dataset, DataLoader
 
 # pad with X and one-hot encode 
@@ -11,13 +12,13 @@ def get_dataloader(batch_size, mode, dataset_file, shuffle, seed=None, segment_l
     loader = DataLoader(
         dataset,
         batch_size = batch_size,
-        shuffle = False,
+        shuffle = False, # because the ProData class handles shuffling already
         drop_last = False,
         pin_memory = True,
     )
     return loader
 
-def create_datapoints(seq, max_len, labels):
+def create_datapoints(seq, max_len, label):
     '''Truncates, pads, and performs one-hot encoding of the protein sequence and labels'''
     
     # uppercase and truncate or pad with 'X' so all are equal length 
@@ -77,23 +78,27 @@ class ProData(Dataset):
             random.seed(seed)
         
         # parse the dataset
+        if verbose:
+            print(f'\t[INFO] Creating {mode} dataset from source: {dataset_file}')
         with open(dataset_file, 'r') as f:
 
             lines = f.read().splitlines()
-            data = np.array([line.split(',') for line in lines])
-            
+            data = [line.split(',') for line in lines]
             # if no truncation, find the maximum length of all sequences 
             if segment_len == None: 
-                max_len = np.max(data[:, 3])
+                # max_len = max([len(row[3]) for row in data])
+                max_len = 600 # based on domain knowledge
             # otherwise, truncate to set length
             else:
                 max_len = segment_len
+            
             if verbose:
-                print(f'\t[INFO] Maximum protein length: {np.max(data[:, 3])}')
-                print(f'\t[INFO] Minimum protein length: {np.min(data[:, 3])}')
-                print(f'\t[INFO] Mean protein length: {np.mean(data[:, 3])}')
-                print(f'\t[INFO] Median protein length: {np.median(data[:, 3])}')
-                print(f'\t[INFO] Will truncate proteins to length {max_len}.')
+                lens = sorted([len(row[3]) for row in data])
+                print(f'\t[STAT] Maximum protein length: {max(lens)}')
+                print(f'\t[STAT] Minimum protein length: {min(lens)}')
+                print(f'\t[STAT] Mean protein length: {sum(lens) / len(lens):.6f}')
+                print(f'\t[STAT] Median protein length: {lens[len(lens)//2]}')
+                print(f'\t[STAT] Will truncate proteins to length {max_len}.')
 
             pidx = 0
             for row in data:
@@ -102,22 +107,25 @@ class ProData(Dataset):
                 
                 # one-hot encoding and padding
                 if mode == 'train': 
-                    X, Y = create_datapoints(seq, max_len, labels)
+                    X, Y = create_datapoints(seq, max_len, label)
                 elif mode == 'test':
                     X, Y = create_datapoints(seq, max_len)
                 else: 
                     raise ValueError('mode must be either "train" or "test".')
                 X = torch.Tensor(np.array(X))
-                Y = torch.Tensor(np.array(Y)[0])
+                Y = torch.Tensor(np.array(Y))
 
                 # add to dataset 
                 self.data.append([X, Y, prot_id, cog_id])
                 
                 # reporting 
-                if verbose and pidx % 100000 == 0:
-                    print(f'\t[INFO] {pidx} proteins loaded.')
+                if verbose and (pidx + 1) % 10000 == 0:
+                    print(f'\t[INFO] {pidx + 1} proteins loaded.')
 
                 pidx += 1
+
+            if verbose:
+                print(f'\t[STAT] X.shape: {X.shape} | Y.shape: {Y.shape}')
 
         # handle indices
         indices = list(range(len(self.data)))
@@ -128,7 +136,7 @@ class ProData(Dataset):
         self.indices = indices
 
         if verbose: 
-            print(f'\t[INFO] {pidx} junctions loaded.')
+            print(f'\t[INFO] {pidx + 1} proteins loaded total.')
 
     def get_mode(self):
         return self.mode
