@@ -34,7 +34,7 @@ def get_mappings():
 
     return cog_to_label, prot_to_cog, proteins
 
-def create_data(): 
+def create_data(size=None): 
     
     cog_to_label, prot_to_cog, proteins = get_mappings()
 
@@ -42,7 +42,10 @@ def create_data():
         
         # write all information to master csv file 
         count = 0
-        pbar = Bar('Writing dataset...', max=len(proteins.keys()))
+        if size: 
+            pbar = Bar('Writing dataset...', max=size)
+        else:
+            pbar = Bar('Writing dataset...', max=len(proteins.keys()))
         for protein in proteins:
             prot_id = str(protein.name)
             try:
@@ -60,8 +63,10 @@ def create_data():
             f.write(f'{prot_id},{cog_id},{label},{protein}\n')
             pbar.next()
             count += 1
+            if size and count == size:
+                break
         pbar.finish()
         print(f'\t[INFO] {count} proteins written.')
 
 if __name__ == '__main__':
-    create_data()
+    create_data(size=200000)

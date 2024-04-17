@@ -3,7 +3,8 @@ import numpy as np
 
 CARDINALITY_ITEM = 16
 INPUT_CHANNELS = 20
-NUM_CLASSES = 27
+NUM_CLASSES = 25
+SEQUENCE_LEN = 600
 
 class ResidualUnit(Module):
     def __init__(self, l, w, ar, bot_mul=1):
@@ -42,7 +43,7 @@ class ProNet(Module):
         if (len(W)+1) % 4 != 0:
             self.residual_blocks.append(Skip(L))
         self.last_cov = Conv1d(L, L, 1)
-        self.final_layer = Linear(L, NUM_CLASSES)  # Change here for 27 classes
+        self.final_layer = Linear(L*SEQUENCE_LEN, NUM_CLASSES)  # change here for 25 classes
         self.softmax = Softmax(dim=1)  # softmax along the feature dimension
 
     def forward(self, x):

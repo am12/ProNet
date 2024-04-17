@@ -73,6 +73,9 @@ class ProData(Dataset):
         self.data = []
         self.indices = [] # shuffle indices
         
+        if mode not in ['train', 'test']:
+            raise ValueError('mode must be either "train" or "test".')
+            
         # set the random state
         if seed:
             random.seed(seed)
@@ -106,12 +109,7 @@ class ProData(Dataset):
                 prot_id, cog_id = row[0], row[1]
                 
                 # one-hot encoding and padding
-                if mode == 'train': 
-                    X, Y = create_datapoints(seq, max_len, label)
-                elif mode == 'test':
-                    X, Y = create_datapoints(seq, max_len)
-                else: 
-                    raise ValueError('mode must be either "train" or "test".')
+                X, Y = create_datapoints(seq, max_len, label)
                 X = torch.Tensor(np.array(X))
                 Y = torch.Tensor(np.array(Y))
 
@@ -136,7 +134,7 @@ class ProData(Dataset):
         self.indices = indices
 
         if verbose: 
-            print(f'\t[INFO] {pidx + 1} proteins loaded total.')
+            print(f'\t[INFO] {pidx} proteins loaded total.')
 
     def get_mode(self):
         return self.mode

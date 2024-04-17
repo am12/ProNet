@@ -10,6 +10,7 @@ from pronet import ProNet
 from prodata import ProData, get_dataloader
 import time
 import random
+from tqdm import tqdm 
 
 ### GLOBAL VARIABLES ### 
 NUM_EPOCHS = 10
@@ -74,7 +75,7 @@ def split_data(datafile, test_ratio=0.15, indices=None, seed=None):
 
     return train_file_path, test_file_path
 
-def train_single_epoch(epoch_num, model, train_loader, logger, optimizer, criterion=None):
+def train_single_epoch(epoch_num, model, device, train_loader, logger, optimizer, criterion=None):
     
     model.train()
     print(f'\t[INFO] Model in train mode.')
@@ -88,7 +89,7 @@ def train_single_epoch(epoch_num, model, train_loader, logger, optimizer, criter
         seqs = seqs.to(torch.float32).to(device)
         labels = labels.to(torch.float32).to(device)
         seqs = torch.permute(seqs, (0, 2, 1))
-        labels = torch.permute(labels, (0, 2, 1))
+        print('\n', seqs.shape, labels.shape)
         
         # forward pass
         pred = model(seqs)
@@ -141,7 +142,7 @@ def train_single_epoch(epoch_num, model, train_loader, logger, optimizer, criter
     # print ("Learning rate: %.5f" % (get_lr(optimizer)))
     # print("\n\n")
 
-def evaluate_single_epoch(epoch_num, model, test_loader, stats_file, criterion=None):
+def evaluate_single_epoch(epoch_num, model, device, test_loader, stats_file, criterion=None):
     
     model.eval()
     print(f'\t[INFO] Model in evaluation mode.')
@@ -210,19 +211,19 @@ def train(train_datafile, test_datafile, train_statsfile, batch_size, lr=1e-3, n
     # load a new instance of ProNet to train
     print(f'\t[Info] Initializing new ProNet model...', flush=True)
     model = ProNet().to(device)
-    #criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     print(f'\t[Info] Done initializing model.', flush=True)
 
     # load data to train the model on 
     print(f'\t[Info] Loading data...', flush=True)
-    train_loader = get_dataloader(batch_size, 'train', train_datafile, True, seed=RANDOM_SEED)
-    test_loader = get_dataloader(batch_size, 'test', test_datafile, False, seed=RANDOM_SEED)
+    # train_loader = get_dataloader(batch_size, 'train', train_datafile, True, seed=RANDOM_SEED)
+    # test_loader = get_dataloader(batch_size, 'test', test_datafile, False, seed=RANDOM_SEED)
     ### to expedite
-    torch.save(train_loader, '../results/1/train_dataloader.pt')
-    torch.save(test_loader, '../results/1/test_dataloader.pt')
-    # train_loader = torch.load('../results/1/train_dataloader.pt')
-    # test_loader = torch.load('../results/1/test_dataloader.pt')
+    # torch.save(train_loader, '../results/1/train_dataloader.pt')
+    # torch.save(test_loader, '../results/1/test_dataloader.pt')
+    train_loader = torch.load('../results/1/train_dataloader.pt')
+    test_loader = torch.load('../results/1/test_dataloader.pt')
     print(f'\t[Info] Done loading data.', flush=True)
 
     # time after iteration
@@ -240,16 +241,17 @@ def train(train_datafile, test_datafile, train_statsfile, batch_size, lr=1e-3, n
     with open(train_statsfile, 'w') as stats_file:
         for epoch_num in range(num_epochs):
             print(f'Epoch {epoch_num}/{num_epochs}:')
-            train_single_epoch(epoch_num, model, train_loader, logger, optimizer)
-            evaluate_single_epoch(epoch_num, model, test_loader, stats_file)
+            train_single_epoch(epoch_num, model, device, train_loader, logger, optimizer, criterion)
+            evaluate_single_epoch(epoch_num, model, device, test_loader, stats_file)
             torch.save(model, f'{out_dir}runs/experiment_{experiment_number}/models/pronet_epoch-{epoch_num}.pt')
         
     print("--- %s minutes ---" % ((time.time() - start_time)/60.0))
 
 
 if __name__ == '__main__':
-   
+
     # train_datafile, test_datafile = split_data(f'{input_dir}dataset.csv')
+    ### TO EXPEDITE 
     train_datafile = '../results/1/train_data.csv'
     test_datafile = '../results/1/test_data.csv'
     train_statsfile = f'{out_dir}train_statistics.txt'
