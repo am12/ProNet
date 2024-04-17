@@ -18,10 +18,10 @@ NUM_EPOCHS = 10
 BATCH_SIZE = 100
 RANDOM_SEED = 42 # this seed is for shuffling data
 SCHEDULER_STEPS = 1000
-experiment_number = 1
+experiment_number = 2
 input_dir = '../results/1/'
 out_dir = '../results/2/'
-os.makedirs(os.path.dirname(out_dir)+'/runs/experiment_'+experiment_number+'/models/', exist_ok=True)
+os.makedirs(os.path.dirname(out_dir)+'/runs/experiment_'+str(experiment_number)+'/models/', exist_ok=True)
 
 def same_seeds(seed):
     '''Fix random seeds for PyTorch'''
@@ -78,10 +78,6 @@ def get_cosine_schedule_with_warmup(
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
-
-def get_lr(optimizer):
-    for param_group in optimizer.param_groups:
-        return param_group['lr']
 
 def split_data(datafile, test_ratio=0.15, indices=None, seed=None, save_loader=False):
     '''Create a training and testing split of the datafiles'''
@@ -149,10 +145,10 @@ def train_single_epoch(epoch_num, model, device, train_loader, logger, criterion
         loss = criterion(pred, labels)
 
         # backward and optimize
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         scheduler.step()
+        optimizer.zero_grad()
         
         ### LOGGING ###
         iter_num = epoch_num * len(train_loader) + batch_idx
@@ -169,8 +165,7 @@ def train_single_epoch(epoch_num, model, device, train_loader, logger, criterion
             batch_idx=batch_idx,
             train_idx=epoch_num * len(train_loader),
             ce_loss=f"{loss:.3f}",
-            scheduler_lr=f'{scheduler.get_last_lr()[0]}',
-            lr=f'{get_lr(optimizer)}'
+            lr=f'{scheduler.get_last_lr()[0]:.6f}',
             # A_auprc = f"{A_auprc:.6f}",
             # D_auprc = f"{D_auprc:.6f}",
             # A_Precision=f"{A_TP/(A_TP+A_FP+1e-6):.6f}",
@@ -237,7 +232,7 @@ def evaluate_single_epoch(epoch_num, model, device, test_loader, stats_file, cri
     
         pbar.close()
 
-    print(f'Accuracy of the model on the test dataset: {100 * correct / total}%')
+    print(f'Accuracy of the model on the test dataset: {100 * correct / total:.4f}%')
     # print(f'Epoch {epoch_idx+0:03}: | Loss: {epoch_loss/len(train_loader):.5f} | Donor top-k Acc: {epoch_donor_acc/len(train_loader):.3f} | Acceptor top-k Acc: {epoch_acceptor_acc/len(train_loader):.3f}')
     # print(f'Junction Precision: {J_G_TP/(J_G_TP+J_G_FP):.5f} | Junction Recall: {J_G_TP/(J_G_TP+J_G_FN):.5f} | TP: {J_G_TP} | FN: {J_G_FN} | FP: {J_G_FP} | TN: {J_G_TN}')
     # print(f'Donor Precision   : {D_G_TP/(D_G_TP+D_G_FP):.5f} | Donor Recall   : {D_G_TP/(D_G_TP+D_G_FN):.5f} | TP: {D_G_TP} | FN: {D_G_FN} | FP: {D_G_FP} | TN: {D_G_TN}')
@@ -292,7 +287,7 @@ def train(train_datafile, test_datafile, train_statsfile, batch_size, lr=1e-3, n
     # get scheduler
     print(f'\t[SYS] Getting schedule...', flush=True)
     scheduler = get_cosine_schedule_with_warmup(optimizer, SCHEDULER_STEPS, len(train_loader)*NUM_EPOCHS)
-    print(f"\t[SYS]: Initialized scheduler. Warmup steps: {SCHEDULER_STEPS} | Total steps: {len(train_loader)*NUM_EPOCHS}", flush=True)
+    print(f"\t[SYS] Initialized scheduler. Warmup steps: {SCHEDULER_STEPS} | Total steps: {len(train_loader)*NUM_EPOCHS}", flush=True)
 
     ## Look into double dipping
 
@@ -313,7 +308,7 @@ def train(train_datafile, test_datafile, train_statsfile, batch_size, lr=1e-3, n
             print(f'Epoch {epoch_num+1}/{num_epochs}:')
             train_single_epoch(epoch_num, model, device, train_loader, logger, criterion, optimizer, scheduler)
             evaluate_single_epoch(epoch_num, model, device, test_loader, stats_file, criterion)
-            torch.save(model, f'{out_dir}runs/experiment_{experiment_number}/models/pronet_epoch-{epoch_num}.pt')
+            torch.save(model, f'{out_dir}runs/experiment_{experiment_number}/models/pronet_epoch-{epoch_num+1}.pt')
         
     print("--- %s minutes ---" % ((time.time() - start_time)/60.0))
 

@@ -53,4 +53,5 @@ class ProNet(Module):
         x = self.last_cov(skip)
         x = x.view(x.size(0), -1)  # Flatten the output for the linear layer
         x = self.final_layer(x)
-        return self.softmax(x) # return raw logit for categorical?
+        # return self.softmax(x) # return raw logit for categorical?
+        return x
