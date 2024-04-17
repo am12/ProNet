@@ -11,7 +11,9 @@ import time
 
 BATCH_SIZE = 16
 RANDOM_SEED = 42
-
+experiment_number = 1
+out_dir = '../results/2/'
+os.makedirs(os.path.dirname(out_dir), exist_ok=True)
 
 def split_data(datafile, test_ratio=0.2, indices=None, seed=None):
     '''Create a training and testing split of the datafiles'''
@@ -84,7 +86,13 @@ def evaluate(model, test_loader):
     print(f'Accuracy of the model on the test dataset: {100 * correct / total}%')
 
 
-def train(train_datafile, train_log_file, batch_size, lr=1e-3, num_epochs=10, device_str=None):
+def categorical_crossentropy_2d(y_pred, y_true, seq_weight=5, gamma=2):
+    return - torch.mean(y_true[:, 0, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 0, :]), gamma ), torch.log(y_pred[:, 0, :]+1e-10) )
+                        + seq_weight * y_true[:, 1, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 1, :]), gamma ), torch.log(y_pred[:, 1, :]+1e-10) )
+                        + seq_weight * y_true[:, 2, :] * torch.mul( torch.pow( torch.sub(1, y_pred[:, 2, :]), gamma ), torch.log(y_pred[:, 2, :]+1e-10) ))
+
+
+def train(train_datafile, test_datafile, train_logfile, batch_size, lr=1e-3, num_epochs=10, device_str=None):
     
     print('Setting up training variables...')
     start_time = time.time()
@@ -102,7 +110,7 @@ def train(train_datafile, train_log_file, batch_size, lr=1e-3, num_epochs=10, de
     # load a new instance of ProNet to train
     print(f'\t[Info] Initializing new ProNet model...', flush=True)
     model = ProNet().to(device)
-    criterion = torch.nn.CrossEntropyLoss()
+    #criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     print(f'\t[Info] Done initializing model.', flush=True)
 
@@ -114,78 +122,89 @@ def train(train_datafile, train_log_file, batch_size, lr=1e-3, num_epochs=10, de
     # time after iteration
     print("--- %s seconds ---" % (time.time() - start_time))
     
-    # TRAINING LOOP
+    #####################
+    ### TRAINING LOOP ###
+    #####################
+
+    # initialize the SummaryWriter
+    writer = SummaryWriter(f'{out_dir}runs/experiment_{experiment_number}')
+
     print('Starting training.')
     start_time = time.time()
-    with open(train_log_file, 'w') as log:
-        for epoch in range(num_epochs):
-            model.train()
-            running_loss = 0.0
-            for batch_idx, data in enumerate(train_loader): 
-
-                seqs, labels, prot_id, cog_id = data
-                seqs = seqs.to(torch.float32).to(device)
-                labels = labels.to(torch.float32).to(device)
-                seqs = torch.permute(seqs, (0, 2, 1))
-                labels = torch.permute(labels, (0, 2, 1))
+    log = open(train_logfile, 'w')
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
+        for batch_idx, data in enumerate(train_loader): 
                 
-                # forward pass
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
+            ### PREDICTION ###
+            seqs, labels, prot_id, cog_id = data
+            seqs = seqs.to(torch.float32).to(device)
+            labels = labels.to(torch.float32).to(device)
+            seqs = torch.permute(seqs, (0, 2, 1))
+            labels = torch.permute(labels, (0, 2, 1))
+            
+            # forward pass
+            outputs = model(seqs)
+            #loss = criterion(outputs, labels)
+            loss = categorical_crossentropy_2d(outputs, labels)
 
-                # backward and optimize
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            # backward and optimize
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            ### LOGGING ###
+            writer.add_scalar('Loss/train', loss.item(), epoch * len(train_loader) + batch_idx)
 
-                running_loss += loss.item()
+            running_loss += loss.item()
+            if batch_idx % 10 == 9:
+                print(f'\t[INFO] Epoch {epoch + 1}, Batch {i + 1}, Loss: {running_loss / 10:.6f}')     
+                running_loss = 0.0
+            
+            # add histograms of model parameters to inspect their distributions
+            for name, weight in model.named_parameters():
+                writer.add_histogram(name, weight, epoch)
+                writer.add_histogram(f'{name}.grad', weight.grad, epoch)
+            
+            is_expr = (labels.sum(axis=(1,2)) >= 1)
+            A_YL = labels[is_expr, 1, :].to('cpu').detach().numpy()
+            A_YP = yp[is_expr, 1, :].to('cpu').detach().numpy()
+            D_YL = labels[is_expr, 2, :].to('cpu').detach().numpy()
+            D_YP = yp[is_expr, 2, :].to('cpu').detach().numpy()
 
-                if batch_idx % 10 == 9:
-                    print(f'\t[INFO] Epoch {epoch + 1}, Batch {i + 1}, Loss: {running_loss / 10:.6f}')     
-                    running_loss = 0.0
+            donor_labels, donor_scores, acceptor_labels, acceptor_scores = get_donor_acceptor_scores(D_YL, A_YL, D_YP, A_YP)
+            
+            # for idx in range(len(yp)):
                 
-                
-                
-                
-                loss, yp = model_fn(seqs, labels, model, criterion)
-                is_expr = (labels.sum(axis=(1,2)) >= 1)
-                A_YL = labels[is_expr, 1, :].to('cpu').detach().numpy()
-                A_YP = yp[is_expr, 1, :].to('cpu').detach().numpy()
-                D_YL = labels[is_expr, 2, :].to('cpu').detach().numpy()
-                D_YP = yp[is_expr, 2, :].to('cpu').detach().numpy()
+                # eles = seqname[idx].split(';')
+                # if len(eles) == 7:
+                #     chr, start, end, strand, name, aln_num, trans = eles
+                #     if strand == '+':
+                #         fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
+                #     elif strand == '-':
+                #         fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
 
-                donor_labels, donor_scores, acceptor_labels, acceptor_scores = get_donor_acceptor_scores(D_YL, A_YL, D_YP, A_YP)
-                # for idx in range(len(yp)):
-                    
-                    # eles = seqname[idx].split(';')
-                    # if len(eles) == 7:
-                    #     chr, start, end, strand, name, aln_num, trans = eles
-                    #     if strand == '+':
-                    #         fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
-                    #     elif strand == '-':
-                    #         fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\t{trans}\n')
+                # else:
+                #     chr, start, end, strand, name, aln_num = eles
+                #     if strand == '+':
+                #         fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
+                #     elif strand == '-':
+                #         fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
+                
+                # junc_counter += 1 
 
-                    # else:
-                    #     chr, start, end, strand, name, aln_num = eles
-                    #     if strand == '+':
-                    #         fw_junc_scores.write(f'{chr}\t{str(start)}\t{str(end)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
-                    #     elif strand == '-':
-                    #         fw_junc_scores.write(f'{chr}\t{str(end)}\t{str(start)}\t{name}\t{str(aln_num)}\t{strand}\t{str(donor_scores[idx])}\t{str(acceptor_scores[idx])}\n')
-                    
-                    # junc_counter += 1 
-
-                # increment the progress bar
-                pbar.next()
+        
+     
 
     print("--- %s seconds ---" % (time.time() - start_time))
 
-    pbar.finish()
-    fw_junc_scores.close()
+
+    log.close()
+
     return out_score_f
 
-
 if __name__ == '__main__':
-
 
     train_dataloader = get_dataloader(BATCH_SIZE, 'train', )
     train_dataset = HandsDataset("train.csv", None, CUDA)  # Adjust path and normalization as necessary
@@ -194,7 +213,8 @@ if __name__ == '__main__':
     test_dataset = HandsDataset("test.csv", None, CUDA)
     test_dataloader = DataLoader(test_dataset, batch_size=4, shuffle=False)
     
+
+    # training 
     train_datafile, test_datafile = split_data()
-    train_log_file = '../results/2/train.log'
-    os.makedirs(os.path.dirname(train_log_file), exist_ok=True)
-    train(train_datafile, train_log_file, BATCH_SIZE)
+    train_logfile = '../results/2/train.log'
+    train(train_datafile, test_datafile, train_logfile, BATCH_SIZE)
