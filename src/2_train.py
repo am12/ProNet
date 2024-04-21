@@ -70,7 +70,7 @@ def get_cosine_schedule_with_warmup(
     """
 
     def lr_lambda(current_step):
-        # Warmup
+        # warmup
         if current_step < num_warmup_steps:
             return float(current_step) / float(max(1, num_warmup_steps))
         # decadence
@@ -158,14 +158,14 @@ def train_single_epoch(epoch_num, model, device, train_loader, logger, criterion
             # add histograms of model parameters to inspect their distributions
             for name, weight in model.named_parameters():
                 logger.add_histogram(name, weight, iter_num)
-                logger.add_histogram(f'{name}.grad', weight.grad, iter_num)
+                # logger.add_histogram(f'{name}.grad', weight.grad, iter_num)
         
         pbar.update(1)
         pbar.set_postfix(
             batch_idx=batch_idx,
             train_idx=epoch_num * len(train_loader),
-            ce_loss=f"{loss:.3f}",
-            lr=f'{scheduler.get_last_lr()[0]:.6f}',
+            ce_loss=f"{loss:.6f}",
+            lr=f'{scheduler.get_last_lr()[0]:.8f}',
             # A_auprc = f"{A_auprc:.6f}",
             # D_auprc = f"{D_auprc:.6f}",
             # A_Precision=f"{A_TP/(A_TP+A_FP+1e-6):.6f}",
@@ -216,10 +216,10 @@ def evaluate_single_epoch(epoch_num, model, device, test_loader, stats_file, cri
                 
             pbar.update(1)
             pbar.set_postfix(
-                batch_id=batch_idx,
+                batch_idx=batch_idx,
                 test_idx=epoch_num * len(test_loader),
-                ce_loss=f"{loss:.3f}",
-                accuracy=f'{100*correct/total:.3f}%'
+                ce_loss=f"{loss:.6f}",
+                accuracy=f'{100*correct/total:.5f}%'
                 # A_auprc = f"{A_auprc:.6f}",
                 # D_auprc = f"{D_auprc:.6f}",
                 # A_Precision=f"{A_TP/(A_TP+A_FP+1e-6):.6f}",

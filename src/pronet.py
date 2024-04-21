@@ -44,7 +44,7 @@ class ProNet(Module):
             self.residual_blocks.append(Skip(L))
         self.last_cov = Conv1d(L, L, 1)
         self.final_layer = Linear(L*SEQUENCE_LEN, NUM_CLASSES)  # change here for 25 classes
-        self.softmax = Softmax(dim=1)  # softmax along the feature dimension
+        # self.softmax = Softmax(dim=1)  # softmax along the feature dimension
 
     def forward(self, x):
         x, skip = self.skip1(self.conv1(x), 0)
@@ -53,5 +53,4 @@ class ProNet(Module):
         x = self.last_cov(skip)
         x = x.view(x.size(0), -1)  # Flatten the output for the linear layer
         x = self.final_layer(x)
-        # return self.softmax(x) # return raw logit for categorical?
-        return x
+        return x # cross entropy loss expects raw logits
