@@ -17,6 +17,8 @@ Download all the files at the link to the data/ directory:
 
 Make sure to expand the cog-20.fa.gz file. 
 
+Additionally, we sourced the toy dataset (used for generalization study) from the UniProtKB database. We selected for "molecular carrier activity" proteins based on Gene Ontology (GO) annotation, about 3k proteins, and downloaded the corresponding fasta file.
+
 ## Nice to Have
 
 1. Experiment with different embedding/representations of data
