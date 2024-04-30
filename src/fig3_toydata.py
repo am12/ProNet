@@ -12,17 +12,42 @@ from sklearn.preprocessing import label_binarize
 from torch.utils.data import Dataset, DataLoader
 from pronet import ProNet
 from prodata import ProData, get_dataloader
+import pyfaidx 
+from pyfaidx import Fasta
+from progress.bar import Bar
 
 ### GLOBAL VARIABLES
-MODELS_DIR = '../results/2/runs/experiment_2/models'
+MODEL= '../results/2/runs/experiment_2/models/pronet_epoch-11.pt'
 NUM_CLASSES = 25
-train_datafile = '../results/1/train_dataloader.pt'
-test_datafile = '../results/1/test_dataloader.pt'
+batch_size = 1000
+RANDOM_SEED = 42
+toy_datafile = '../results/1/toy_dataloader.pt'
 fig_dir = '../results/fig'
-output_file = '../results/3/data.tsv'
+output_file = '../results/3/toy_data.tsv'
 os.makedirs(os.path.dirname(output_file), exist_ok=True)
-num_to_label = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G', 7: 'H', 8: 'I', 9: 'J', 10: 'K', 11: 'L', 12: 'M', 13: 'N', 14: 'O', 15: 'P', 16: 'Q', 17: 'R', 18: 'S', 19: 'T', 20: 'U', 21: 'V', 22: 'W', 23: 'X', 24: 'Z'}
+num_to_label = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G', 7: 'H', 8: 'I',
+                 9: 'J', 10: 'K', 11: 'L', 12: 'M', 13: 'N', 14: 'O', 15: 'P', 16: 'Q', 
+                17: 'R', 18: 'S', 19: 'T', 20: 'U', 21: 'V', 22: 'W', 23: 'X', 24: 'Z'}
 
+proteins = Fasta(f'../data/uniprot_func_carrier.fasta', sequence_always_upper=True, key_function=lambda s: s[:-2] + '.' + s[-1])
+print(f'\t[INFO] {len(proteins.keys())} proteins loaded.')
+
+with open(f'../results/1/toy_dataset.csv', 'w') as f:
+    # write all information to master csv file 
+    count = 0
+    pbar = Bar('Writing dataset...', max=len(proteins.keys()))
+    for protein in proteins:
+        prot_id = str(protein.name)
+        cog_id = '-'
+        label = 'J'
+        f.write(f'{prot_id},{cog_id},{label},{protein}\n')
+        pbar.next()
+        count += 1
+    pbar.finish()
+    print(f'\t[INFO] {count} proteins written.')
+
+toy_loader = get_dataloader(batch_size, 'train', f'../results/1/toy_dataset.csv', True, seed=RANDOM_SEED)
+torch.save(toy_loader, toy_datafile)
 
 def evaluate_model(model_path, dataloader, class_count, basename, device='cuda', criterion=nn.CrossEntropyLoss()):
     # Load the model
@@ -81,12 +106,11 @@ def evaluate_model(model_path, dataloader, class_count, basename, device='cuda',
     print('-'*120)
     
     # Get labels
-    # class_nums = np.arange(np.max(y_predictions_class))
-    # class_labels = [num_to_label[i] for i in class_nums]
-    # print(class_nums)
-    # print(class_labels)
-    class_labels = ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'V']
+    print(set(y_predictions_class), set(y_labels_class))
+    class_labels = [num_to_label[i] for i in set(y_predictions_class)]
     print(class_labels)
+    # class_labels = ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'V']
+    # print(class_labels)
     print('-'*120)
 
     ### CONFUSION MATRIX
@@ -94,14 +118,12 @@ def evaluate_model(model_path, dataloader, class_count, basename, device='cuda',
     cm = pd.DataFrame(cm, index=class_labels, columns=class_labels)
     print(cm)
     plt.figure(figsize=(12, 10))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_labels, yticklabels=class_labels)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', xticklabels=class_labels, yticklabels=class_labels)
     plt.xlabel('Predicted Labels')
     plt.ylabel('True Labels')
     plt.title(f'Confusion Matrix for {basename}')
     plt.savefig(f'{fig_dir}/{basename}_Confusion_Matrix.png', dpi=300, bbox_inches='tight')
     # plt.show()
-
-
 
     ### MULTI-CLASS ROC CURVE
     fpr = dict()
@@ -151,45 +173,22 @@ def evaluate_model(model_path, dataloader, class_count, basename, device='cuda',
 
     return {'accuracy': accuracy, 'precision_macro': precision_macro, 'recall_macro': recall_macro}
 
-### RUNNER
-if __name__ == "__main__":
 
-    device = 'cpu'
-    if torch.cuda.is_available(): 
-        device = 'cuda'
-    elif torch.backends.mps.is_available():
-        device = 'mps'
+device = 'cpu'
+if torch.cuda.is_available(): 
+    device = 'cuda'
+elif torch.backends.mps.is_available():
+    device = 'mps'
 
-    model_paths = []
-    for root, dirs, files in os.walk(MODELS_DIR):
-        for name in files:
-            model_paths.append(os.path.join(root, name))
-    model_paths.sort()
+print('loading data...')
+test_loader = torch.load(toy_datafile)
+print('done loading data.')
 
-    print('loading data...')
-    #train_loader = torch.load(train_datafile)
-    test_loader = torch.load(test_datafile)
-    print('done loading data.')
-    
-    with open(output_file, 'w') as f:
-        #f.write(f'Model\tTrain Accuracy\tTrain Precision (Macro)\tTrain Recall (Macro)\tTest Accuracy\tTest Precision (Macro)\tTest Recall (Macro)\n')
-        f.write(f'Model\tTest Accuracy\tTest Precision (Macro)\tTest Recall (Macro)\n')
-        for model_path in model_paths[2:3]:
-            basename = os.path.basename(model_path)
-            print(f'Running evaluation for {basename}...')
-            #train_metrics = evaluate_model(model_path, train_loader, NUM_CLASSES, basename, device)   
-            test_metrics = evaluate_model(model_path, test_loader, NUM_CLASSES, basename, device)
-            #f.write(f'{basename}\t{train_metrics["accuracy"]}\t{train_metrics["precision_macro"]}\t{train_metrics["recall_macro"]}\t{test_metrics["accuracy"]}\t{test_metrics["precision_macro"]}\t{test_metrics["recall_macro"]}\n')
-            f.write(f'{basename}\t{test_metrics["accuracy"]}\t{test_metrics["precision_macro"]}\t{test_metrics["recall_macro"]}\n')
-
-
-# def get_accuracy(y_prob, y_true):
-#     pred_lab = torch.argmax(y_prob,dim=1)
-#     labels_lab = torch.argmax(y_true,dim=1)
-#     total += labels_lab.size(0)
-#     correct += (pred_lab == labels_lab).sum().item() 
-#     return float(correct / total)
-
-#     # assert y_true.ndim == 1 and y_true.size() == y_prob.size()
-#     # y_prob = y_prob > 0.5
-#     # return (y_true == y_prob).sum().item() / y_true.size(0)
+with open(output_file, 'w') as f:
+    #f.write(f'Model\tTrain Accuracy\tTrain Precision (Macro)\tTrain Recall (Macro)\tTest Accuracy\tTest Precision (Macro)\tTest Recall (Macro)\n')
+    f.write(f'Model\tTest Accuracy\tTest Precision (Macro)\tTest Recall (Macro)\n')
+    model_path = MODEL
+    basename = 'TOY_DATA'
+    print(f'Running evaluation for {basename}...')
+    test_metrics = evaluate_model(model_path, test_loader, NUM_CLASSES, basename, device)
+    f.write(f'{basename}\t{test_metrics["accuracy"]}\t{test_metrics["precision_macro"]}\t{test_metrics["recall_macro"]}\n')
